@@ -11,7 +11,7 @@ st.set_page_config(
     page_title="서경아 - 서울 아파트 경매",
     page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # DB 초기화
@@ -123,17 +123,17 @@ tab1, tab2, tab3 = st.tabs(["🏠 경매", "🔍 사건조회", "📰 뉴스"])
 
 with tab1:
     # 경매 탭 내용을 여기에 인라인으로 렌더링
-    from pages.auction_tab import render_auction_tab
+    from tabs.auction_tab import render_auction_tab
     render_auction_tab()
 
 with tab2:
     # 사건번호 조회 탭 (실제 API 연동)
-    from pages.case_lookup import render_case_lookup
+    from tabs.case_lookup import render_case_lookup
     render_case_lookup()
 
 with tab3:
     # 뉴스 탭 내용을 여기에 인라인으로 렌더링
-    from pages.news_tab import render_news_tab
+    from tabs.news_tab import render_news_tab
     render_news_tab()
 
 # 푸터
