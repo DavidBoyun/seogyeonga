@@ -1,7 +1,7 @@
 # 서경아 개발 로드맵
 
 > 작성일: 2024-01-12
-> 최종 업데이트: 2026-01-12
+> 최종 업데이트: 2026-01-12 17:20
 > 목표: MVP → 실제 운영 가능한 서비스
 > 확장: 서경아(서울) → 한경아(전국 아파트)
 
@@ -12,64 +12,64 @@
 ### 완료된 기능
 | 기능 | 상태 | 파일 |
 |------|------|------|
-| Streamlit UI | OK | `app.py` |
-| AI 권리분석 | OK | `services/ai_analyzer.py` |
-| PDF 리포트 생성 | OK | `services/pdf_report.py` |
-| Radar Chart 위험도 | OK | `components/risk_chart.py` |
-| 뉴스/유튜브 크롤링 | OK | `services/news_crawler.py` |
-| **법원 크롤러 (60개 법원)** | OK | `services/court_crawler.py` |
-| **사건번호 조회 페이지** | OK | `pages/case_lookup.py` |
-| 배포 설정 | OK | `.streamlit/config.toml` |
+| Streamlit UI | ✅ OK | `app.py` |
+| AI 권리분석 | ✅ OK | `services/ai_analyzer.py` |
+| PDF 리포트 생성 | ✅ OK | `services/pdf_report.py` |
+| Radar Chart 위험도 | ✅ OK | `components/risk_chart.py` |
+| 뉴스/유튜브 크롤링 | ✅ OK | `services/news_crawler.py` |
+| **법원 크롤러 (60개 법원)** | ✅ OK | `services/court_crawler.py` |
+| **사건번호 조회** | ✅ OK | `tabs/case_lookup.py` |
+| 배포 설정 | ✅ OK | `.streamlit/config.toml` |
+| **Streamlit Cloud 배포** | ✅ OK | [seogyeonga.streamlit.app](https://seogyeonga-wggf87rh2g7krntnpspvyf.streamlit.app/) |
 
 ### 작동하는 핵심 기능
 ```
 사건번호 조회 → 실제 법원경매 API 연동 → AI 분석 → PDF 리포트
 ```
 
+### 개발 중인 기능
+| 기능 | 상태 | 비고 |
+|------|------|------|
+| 물건 목록 검색 | 🚧 개발 중 | 구 API deprecated, 신규 API 분석 필요 |
+| 실제 이미지 크롤링 | 📋 예정 | 감정평가서 PDF에서 추출 |
+
 ---
 
-## 개발 우선순위 (상위 0.1% 개발자 관점)
+## 완료된 Phase
 
-### Phase 1: 지금 당장 (오늘)
+### ✅ Phase 1: 배포 완료
 
 #### 1-1. Streamlit Cloud 배포
 ```
-상태: 준비 완료
-작업:
-1. GitHub 저장소 생성
-2. seogyeonga 폴더 푸시
-3. Streamlit Cloud 연결
-4. URL 획득
-
-예상 시간: 30분
-결과: 누구나 접근 가능한 URL
+상태: ✅ 완료
+결과: https://seogyeonga-wggf87rh2g7krntnpspvyf.streamlit.app/
+GitHub: https://github.com/DavidBoyun/seogyeonga
 ```
 
-#### 1-2. 첫 사용자 피드백 수집
+#### 1-2. QA 테스트
 ```
-방법:
-- 주변 지인에게 URL 공유
-- "사건번호 조회" 기능 사용하게 하기
-- 피드백 수집 (무엇이 부족한지)
-
-목표: 실제 사용자가 원하는 것 파악
+상태: ✅ 완료
+- 사이드바 중복 메뉴 수정 (pages/ → tabs/)
+- 사건번호 조회 기능 정상 작동 확인
 ```
 
 ---
 
-### Phase 2: 이번 주 (Day 2-7)
+### 🚧 Phase 2: 실제 데이터 연동 (진행 중)
 
-#### 2-1. 검색 API 분석 (선택적)
+#### 2-1. 검색 API 분석
 ```
-현재: 사건번호 직접 입력 필요
-목표: 지역/가격 조건으로 자동 검색
+상태: 🔍 분석 완료 (구 API deprecated)
 
-접근법:
-1. 브라우저 DevTools로 실제 요청 캡처
-2. /pgj/pgjsearch/ 파라미터 분석
-3. 또는 하옥션(Hauction) 연동 검토
+발견 사항:
+- 구 API (RetrieveRealEstMulDetailList.laf): 404 반환
+- 신규 시스템 (/pgj/): WebSquare 기반
+- 사건번호 조회 API: 정상 작동
 
-우선순위: 사용자 피드백에 따라 결정
+다음 단계:
+- Option A: 신규 /pgj/ 검색 API 파라미터 분석
+- Option B: 하옥션(Hauction) 등 대체 소스 연동
+- Option C: Selenium/Playwright로 동적 크롤링
 ```
 
 #### 2-2. 감정평가서 연동 (핵심 가치)
