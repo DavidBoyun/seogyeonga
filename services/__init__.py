@@ -4,7 +4,7 @@ from .news_crawler import (
     get_sample_youtube_videos, summarize_content, fetch_all_content
 )
 from .notification import send_auction_reminder, KakaoNotifier, get_kakao_auth_url
-from .ai_analyzer import analyze_auction, get_ai, SeogyeongaAI
+from .ai_analyzer import analyze_auction, get_ai, SeogyeongaAI, generate_appraisal_summary
 from .pdf_report import generate_auction_report, get_report_filename
 from .image_crawler import get_auction_images, get_cached_images, get_sample_images
 from .appraisal_crawler import (

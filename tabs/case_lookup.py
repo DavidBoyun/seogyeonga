@@ -10,7 +10,10 @@ from services.court_crawler import (
     SEOUL_COURTS,
     format_case_number_for_api
 )
-from services import analyze_auction, generate_auction_report, get_report_filename
+from services import (
+    analyze_auction, generate_auction_report, get_report_filename,
+    generate_appraisal_summary
+)
 from components.risk_chart import render_risk_radar_chart
 
 
@@ -253,6 +256,8 @@ def render_ai_analysis(results: dict, case_no: str, court: str):
         "min_price": 0,
         "auction_count": 1,
         "risk_level": "주의",
+        "risk_reason": "",
+        "area": 0,
     }
 
     # API 결과에서 데이터 추출
@@ -268,28 +273,56 @@ def render_ai_analysis(results: dict, case_no: str, court: str):
                 "area": float(item.get('excsvAr', 0) or 0),
             })
 
+    # 분석 유형 선택
+    analysis_type = st.radio(
+        "분석 유형 선택",
+        ["📋 AI 감정평가 요약", "🔍 권리분석"],
+        horizontal=True,
+        key="analysis_type"
+    )
+
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        # AI 분석 버튼
-        if st.button("🔍 AI 권리분석 실행", use_container_width=True):
-            with st.spinner("AI가 분석 중입니다..."):
-                analysis = analyze_auction(auction_data, provider="rule")
+        if analysis_type == "📋 AI 감정평가 요약":
+            # AI 감정평가 스타일 요약
+            if st.button("📋 AI 감정평가 요약 생성", use_container_width=True):
+                with st.spinner("AI가 감정평가를 요약 중입니다..."):
+                    summary = generate_appraisal_summary(auction_data, case_data)
 
-            st.markdown("### 분석 결과")
-            st.markdown(analysis)
+                st.markdown(summary)
 
-            # 세션에 저장
-            st.session_state[f"analysis_{case_no}"] = analysis
-            st.session_state[f"auction_data_{case_no}"] = auction_data
+                # 세션에 저장
+                st.session_state[f"appraisal_summary_{case_no}"] = summary
+                st.session_state[f"auction_data_{case_no}"] = auction_data
+        else:
+            # 기존 권리분석
+            if st.button("🔍 AI 권리분석 실행", use_container_width=True):
+                with st.spinner("AI가 분석 중입니다..."):
+                    analysis = analyze_auction(auction_data, provider="rule")
+
+                st.markdown("### 분석 결과")
+                st.markdown(analysis)
+
+                # 세션에 저장
+                st.session_state[f"analysis_{case_no}"] = analysis
+                st.session_state[f"auction_data_{case_no}"] = auction_data
 
     with col2:
         # 위험도 차트
         st.markdown("### 위험도 평가")
         render_risk_radar_chart(auction_data)
 
+    # 이전 분석 결과 표시
+    if f"appraisal_summary_{case_no}" in st.session_state and analysis_type == "📋 AI 감정평가 요약":
+        st.divider()
+        with st.expander("📋 이전 감정평가 요약 보기", expanded=False):
+            st.markdown(st.session_state[f"appraisal_summary_{case_no}"])
+
     # PDF 리포트 생성
-    if f"analysis_{case_no}" in st.session_state:
+    has_analysis = f"analysis_{case_no}" in st.session_state or f"appraisal_summary_{case_no}" in st.session_state
+
+    if has_analysis:
         st.divider()
 
         col1, col2 = st.columns(2)
@@ -298,8 +331,13 @@ def render_ai_analysis(results: dict, case_no: str, court: str):
             if st.button("📄 PDF 리포트 생성", use_container_width=True):
                 with st.spinner("PDF 생성 중..."):
                     try:
-                        analysis = st.session_state[f"analysis_{case_no}"]
-                        auction = st.session_state[f"auction_data_{case_no}"]
+                        # 감정평가 요약 또는 권리분석 사용
+                        if f"appraisal_summary_{case_no}" in st.session_state:
+                            analysis = st.session_state[f"appraisal_summary_{case_no}"]
+                        else:
+                            analysis = st.session_state.get(f"analysis_{case_no}", "분석 결과 없음")
+
+                        auction = st.session_state.get(f"auction_data_{case_no}", auction_data)
 
                         pdf_bytes = generate_auction_report(auction, analysis)
                         filename = get_report_filename(auction)
