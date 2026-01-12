@@ -11,3 +11,7 @@ from .appraisal_crawler import (
     get_appraisal_data, get_sample_appraisal_data,
     summarize_appraisal_with_ai, AppraisalCrawler, AppraisalParser
 )
+from .selenium_crawler import (
+    SeleniumAuctionCrawler, crawl_seoul_auctions_selenium,
+    SEOUL_SGG_CODES, SELENIUM_AVAILABLE
+)
