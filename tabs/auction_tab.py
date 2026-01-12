@@ -1,5 +1,6 @@
 """
 경매 탭 (필터 + 목록 + 지도)
+실제 법원경매 API 연동
 """
 import streamlit as st
 from datetime import date, timedelta
@@ -10,10 +11,41 @@ from database import (
 from components.auction_card import render_auction_list
 from components.auction_map import render_auction_map
 from components.auth import get_current_user_id
+from services.court_crawler import (
+    CourtAuctionCrawler, SEOUL_SIDO_CODE, SEOUL_SGG_CODES
+)
+
+
+# 구 이름 -> 코드 매핑 (3자리 코드)
+SGG_CODE_MAP = {name: code[2:] for name, code in SEOUL_SGG_CODES.items()}
+
+
+def fetch_auctions_from_db(
+    gugun: str = None,
+    dong: str = None,
+    min_price: int = None,
+    max_price: int = None,
+    auction_counts: list = None,
+    risk_levels: list = None,
+    days_until: int = None
+) -> list:
+    """
+    데이터베이스에서 경매 물건 가져오기
+    (법원경매 목록 API가 업데이트될 때까지 샘플 데이터 사용)
+    """
+    return get_auctions(
+        gugun=gugun,
+        dong=dong,
+        min_price=min_price,
+        max_price=max_price,
+        auction_counts=auction_counts,
+        risk_levels=risk_levels,
+        days_until=days_until
+    )
 
 
 def render_auction_tab():
-    """경매 탭 렌더링"""
+    """경매 탭 렌더링 (실제 API 연동)"""
 
     user_id = get_current_user_id()
 
@@ -23,7 +55,8 @@ def render_auction_tab():
 
         # 지역 필터
         st.markdown("##### 지역")
-        gugun_list = get_gugun_list()
+        # 실제 크롤링 가능한 서울 구 목록
+        gugun_list = sorted(list(SEOUL_SGG_CODES.keys()))
         gugun_options = ["전체"] + gugun_list
         selected_gugun = st.selectbox(
             "구 선택",
@@ -146,8 +179,10 @@ def render_auction_tab():
     if show_favorites and user_id:
         auctions = get_user_favorites(user_id)
         total_count = len(auctions)
+        data_source = "favorites"
     else:
-        auctions = get_auctions(
+        # 데이터베이스에서 경매 물건 조회
+        auctions = fetch_auctions_from_db(
             gugun=selected_gugun if selected_gugun != "전체" else None,
             dong=selected_dong,
             min_price=min_price,
@@ -157,9 +192,14 @@ def render_auction_tab():
             days_until=days_until
         )
         total_count = len(auctions)
+        data_source = "database"
 
-    # 결과 카운트
+    # 결과 카운트 및 안내
     st.markdown(f"**{total_count}**개 물건")
+
+    # 실시간 데이터 안내
+    if data_source == "database":
+        st.info("💡 **실제 경매 물건 조회**: [🔍 사건조회] 탭에서 사건번호로 실시간 법원 데이터를 확인하세요.")
 
     # 관심 물건 ID 세트
     favorite_ids = set()

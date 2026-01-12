@@ -19,11 +19,13 @@ COURT_BASE_URL = "https://www.courtauction.go.kr"
 
 # API 엔드포인트 (확인된 작동 API)
 API_ENDPOINTS = {
+    # 신규 API (사건번호 조회용)
     "사건내역": f"{COURT_BASE_URL}/pgj/pgj15A/selectAuctnCsSrchRslt.on",
     "기일내역": f"{COURT_BASE_URL}/pgj/pgj15A/selectCsDtlDxdyDts.on",
     "문건송달내역": f"{COURT_BASE_URL}/pgj/pgj15A/selectDlvrOfdocDtsDtl.on",
-    # 물건목록 검색 (추가 분석 필요)
-    "물건검색": f"{COURT_BASE_URL}/pgj/pgjsearch/searchControllerMain.on",
+    # 구 API (목록 검색용 - 작동 확인됨)
+    "물건검색": f"{COURT_BASE_URL}/RetrieveRealEstMulDetailList.laf",
+    "시군구목록": f"{COURT_BASE_URL}/RetrieveAucSigu.ajax",
 }
 
 # 기본 헤더
@@ -323,14 +325,11 @@ class CourtAuctionCrawler:
         property_type: str = "아파트"
     ) -> Dict[str, Any]:
         """
-        경매 물건 검색
-
-        주의: 검색 API는 아직 완전히 분석되지 않음
-        현재는 샘플 데이터 반환
+        경매 물건 검색 (구 API 사용 - RetrieveRealEstMulDetailList.laf)
 
         Args:
             sido_code: 시도 코드 (서울: 11)
-            sgg_code: 시군구 코드 (강남구: 11680)
+            sgg_code: 시군구 코드 (강남구: 680 - 3자리)
             page: 페이지 번호
             page_size: 페이지 크기
             property_type: 물건 종류
@@ -338,49 +337,245 @@ class CourtAuctionCrawler:
         Returns:
             검색 결과 딕셔너리
         """
-        if not self._init_session():
-            return {"items": [], "total": 0, "error": "세션 초기화 실패"}
+        # 시군구 코드 변환 (11680 -> 680)
+        if sgg_code and len(sgg_code) == 5:
+            sgg_code = sgg_code[2:]  # 앞 2자리(시도코드) 제거
 
-        # 검색 API 시도 (WebSquare 파라미터)
-        search_params = {
-            "dma_srchMtrInfoLst": {
-                "mvprpRletDvsCd": "1",  # 부동산
-                "rprsAdongSdCd": sido_code,
-                "rprsAdongSggCd": sgg_code or "",
-                "pageNo": str(page),
-                "rowPerPage": str(page_size),
-                "objctCdLarClsCd": "001",  # 주거용
-                "objctCdMidClsCd": "001001",  # 집합건물
-            }
+        # 타겟 행 계산 (페이지네이션)
+        target_row = (page - 1) * page_size + 1
+
+        # Form 파라미터 구성 (구 API)
+        form_data = {
+            "_FORM_YN": "Y",
+            "bubwLocGubun": "2",
+            "daepyoSidoCd": sido_code,
+            "daepyoSiguCd": sgg_code or "",
+            "mDaepyoSidoCd": sido_code,
+            "mDaepyoSiguCd": sgg_code or "",
+            "srnID": "PNO102000",
+            "targetRow": str(target_row),
         }
 
-        if property_type == "아파트":
-            search_params["dma_srchMtrInfoLst"]["objctCdSmlClsCd"] = "001001001"
+        # 구 API용 헤더 (euc-kr 인코딩)
+        old_headers = {
+            "Host": "www.courtauction.go.kr",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ko-KR,ko;q=0.8,en-US;q=0.5,en;q=0.3",
+            "Accept-Charset": "windows-949,utf-8;q=0.7,*;q=0.7",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
 
         try:
             response = self.session.post(
                 API_ENDPOINTS["물건검색"],
-                json=search_params,
+                data=form_data,
+                headers=old_headers,
                 timeout=30
             )
 
+            # euc-kr 인코딩 설정
+            response.encoding = 'euc-kr'
+
             if response.status_code == 200:
-                try:
-                    data = response.json()
-                    return self._parse_search_result(data)
-                except json.JSONDecodeError:
-                    # HTML 응답인 경우 파싱 시도
-                    if "html" in response.headers.get("Content-Type", "").lower():
-                        return self._parse_html_result(response.text)
-                    return {"items": [], "total": 0, "error": "응답 파싱 실패"}
+                # HTML 응답 파싱
+                items = self._parse_auction_list_html(response.text, sido_code, sgg_code)
+
+                # 아파트만 필터링
+                if property_type == "아파트":
+                    items = [item for item in items if item.get("item_type") in ["아파트", "주상복합", "오피스텔"]]
+
+                return {
+                    "items": items,
+                    "total": len(items),
+                    "page": page,
+                    "source": "courtauction_api"
+                }
             else:
                 print(f"[CRAWLER] 검색 실패: {response.status_code}")
-                # 샘플 데이터 반환 (개발용)
                 return self._get_sample_data(sgg_code)
 
         except Exception as e:
             print(f"[CRAWLER] 검색 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return self._get_sample_data(sgg_code)
+
+    def _parse_auction_list_html(self, html: str, sido_code: str, sgg_code: str) -> List[Dict[str, Any]]:
+        """
+        구 API HTML 응답에서 경매 물건 목록 파싱
+
+        테이블 구조: Ltbl_list 클래스의 테이블
+        """
+        soup = BeautifulSoup(html, 'html.parser')
+        items = []
+
+        # 테이블 찾기 (class="Ltbl_list")
+        table = soup.find('table', class_='Ltbl_list')
+        if not table:
+            print("[CRAWLER] 테이블을 찾을 수 없음")
+            return items
+
+        tbody = table.find('tbody')
+        if not tbody:
+            print("[CRAWLER] tbody를 찾을 수 없음")
+            return items
+
+        rows = tbody.find_all('tr')
+
+        for row in rows:
+            try:
+                cols = row.find_all('td')
+                if len(cols) < 7:
+                    continue
+
+                # 사건정보 (법원, 사건번호)
+                case_info_div = cols[1].find('div')
+                if not case_info_div:
+                    continue
+
+                case_texts = [t.strip() for t in case_info_div.stripped_strings]
+                court = case_texts[0] if len(case_texts) > 0 else ""
+                case_no = case_texts[1] if len(case_texts) > 1 else ""
+
+                # 물건정보 (물건번호, 물건종류)
+                item_texts = [t.strip() for t in cols[2].stripped_strings]
+                item_no = item_texts[0] if len(item_texts) > 0 else ""
+                item_type = item_texts[1] if len(item_texts) > 1 else ""
+
+                # 주소/면적
+                addr_div = cols[3].find('div')
+                if addr_div:
+                    addr_texts = [t.strip() for t in addr_div.stripped_strings]
+                    address = addr_texts[0] if len(addr_texts) > 0 else ""
+                    area_info = addr_texts[1] if len(addr_texts) > 1 else ""
+                else:
+                    address = cols[3].get_text(strip=True)
+                    area_info = ""
+
+                # 주소 파싱
+                addr_parts = address.split() if address else []
+                addr0 = addr_parts[0] if len(addr_parts) > 0 else ""  # 시도
+                addr1 = addr_parts[1] if len(addr_parts) > 1 else ""  # 구
+                addr2 = addr_parts[2] if len(addr_parts) > 2 else ""  # 동
+
+                # 비고
+                remarks = cols[4].get_text(strip=True)
+
+                # 감정가/최저가
+                value_divs = cols[5].find_all('div')
+                appraisal_price = 0
+                min_price = 0
+                if len(value_divs) >= 2:
+                    price_text1 = value_divs[0].get_text(strip=True).replace(",", "").replace("원", "")
+                    price_text2 = value_divs[1].get_text(strip=True).replace(",", "").replace("원", "")
+                    try:
+                        appraisal_price = int(price_text1) if price_text1.isdigit() else 0
+                        min_price = int(price_text2) if price_text2.isdigit() else 0
+                    except:
+                        pass
+
+                # 입찰정보 (날짜)
+                auction_div = cols[6].find('div')
+                auction_date = ""
+                if auction_div:
+                    # onclick에서 날짜 추출 시도
+                    onclick = auction_div.get('onclick', '')
+                    if onclick:
+                        import re
+                        date_match = re.search(r"'(\d{4}-\d{2}-\d{2})'", onclick)
+                        if date_match:
+                            auction_date = date_match.group(1)
+                    if not auction_date:
+                        auction_date = auction_div.get_text(strip=True)
+
+                # 상태
+                status = cols[7].get_text(strip=True) if len(cols) > 7 else ""
+
+                # 아이템 구성
+                auction_item = {
+                    "id": f"{case_no}_{item_no}",
+                    "court": court,
+                    "case_no": case_no,
+                    "item_no": item_no,
+                    "item_type": item_type,
+                    "apt_name": self._extract_apt_name(address, item_type),
+                    "address": address,
+                    "addr0": addr0,
+                    "addr1": addr1,
+                    "addr2": addr2,
+                    "area_info": area_info,
+                    "area": self._parse_area(area_info),
+                    "appraisal_price": appraisal_price,
+                    "min_price": min_price,
+                    "auction_date": auction_date,
+                    "auction_count": self._parse_auction_count(remarks),
+                    "status": status,
+                    "remarks": remarks,
+                    "risk_level": "안전",
+                    "risk_reason": "",
+                }
+
+                # 위험도 계산
+                auction_item["risk_level"] = calculate_risk_level(auction_item)
+                auction_item["risk_reason"] = get_risk_reason(auction_item)
+
+                items.append(auction_item)
+
+            except Exception as e:
+                print(f"[CRAWLER] 행 파싱 오류: {e}")
+                continue
+
+        return items
+
+    def _extract_apt_name(self, address: str, item_type: str) -> str:
+        """주소에서 아파트명 추출"""
+        if not address:
+            return item_type
+
+        # 아파트, 빌라 등 이름 패턴
+        patterns = [
+            r'([가-힣A-Za-z0-9]+아파트)',
+            r'([가-힣A-Za-z0-9]+빌라)',
+            r'([가-힣A-Za-z0-9]+맨션)',
+            r'([가-힣A-Za-z0-9]+타워)',
+            r'([가-힣A-Za-z0-9]+파크)',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, address)
+            if match:
+                return match.group(1)
+
+        # 못 찾으면 주소의 마지막 부분 반환
+        parts = address.split()
+        return parts[-1] if parts else item_type
+
+    def _parse_area(self, area_info: str) -> float:
+        """면적 정보에서 전용면적 추출"""
+        if not area_info:
+            return 0.0
+
+        # "전용 84.5㎡" 또는 "84.5㎡" 패턴
+        match = re.search(r'(\d+\.?\d*)㎡', area_info)
+        if match:
+            return float(match.group(1))
+        return 0.0
+
+    def _parse_auction_count(self, remarks: str) -> int:
+        """비고에서 유찰 횟수 추출"""
+        if not remarks:
+            return 1
+
+        # "신건", "2회", "3회 유찰" 등 패턴
+        match = re.search(r'(\d+)회', remarks)
+        if match:
+            return int(match.group(1))
+
+        if "신건" in remarks:
+            return 1
+
+        return 1
 
     def _parse_search_result(self, data: Dict) -> Dict[str, Any]:
         """JSON 검색 결과 파싱"""
