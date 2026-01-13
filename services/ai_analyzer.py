@@ -1,16 +1,36 @@
 """
 서경아 AI 권리분석 모듈
-Ollama, DeepSeek, Claude 지원
+Gemini, Claude, DeepSeek, Ollama 지원
+
+모델 캐스케이딩 전략:
+- Gemini Flash: PDF 텍스트 추출, 기본 요약 (저비용)
+- Claude Opus: 복잡한 권리분석 (고품질)
 """
 
 import os
 import requests
 from typing import Dict, Optional
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 # 환경변수
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# Gemini 초기화 (새 google.genai 패키지)
+GEMINI_CLIENT = None
+GEMINI_AVAILABLE = False
+try:
+    from google import genai
+    if GEMINI_API_KEY:
+        GEMINI_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
+        GEMINI_AVAILABLE = True
+except ImportError:
+    pass
 
 # 기본 모델 설정
 DEFAULT_PROVIDER = os.getenv("AI_PROVIDER", "ollama")  # ollama, deepseek, claude, rule
@@ -74,7 +94,9 @@ class SeogyeongaAI:
 
         prompt = self._build_prompt(auction)
 
-        if self.provider == "ollama":
+        if self.provider == "gemini":
+            return self._analyze_gemini(prompt)
+        elif self.provider == "ollama":
             return self._analyze_ollama(prompt)
         elif self.provider == "deepseek":
             return self._analyze_deepseek(prompt)
@@ -82,6 +104,24 @@ class SeogyeongaAI:
             return self._analyze_claude(prompt)
         else:
             return self._fallback_analysis(auction)
+
+    def _analyze_gemini(self, prompt: str) -> str:
+        """Gemini Flash로 분석 (저비용)"""
+        if not GEMINI_AVAILABLE or not GEMINI_CLIENT:
+            return self._fallback_msg() + "\n(Gemini API 키 없음)"
+
+        try:
+            response = GEMINI_CLIENT.models.generate_content(
+                model="gemini-2.0-flash-lite",
+                contents=f"{SYSTEM_PROMPT}\n\n{prompt}",
+                config={
+                    "max_output_tokens": 2000,
+                    "temperature": 0.7,
+                }
+            )
+            return response.text
+        except Exception as e:
+            return self._fallback_msg() + f"\n(Gemini 오류: {e})"
 
     def _build_prompt(self, auction: Dict) -> str:
         """프롬프트 생성"""
@@ -444,3 +484,117 @@ def generate_appraisal_summary(auction: Dict, case_data: Dict = None) -> str:
 """
 
     return summary
+
+
+# ================================
+# PDF 감정평가서 AI 요약 (Gemini Flash)
+# ================================
+
+PDF_SUMMARY_PROMPT = """당신은 부동산 경매 전문가입니다.
+아래 감정평가서 PDF 텍스트를 분석하여 핵심 내용을 요약해주세요.
+
+## 요약 형식
+1. **물건 개요**: 소재지, 용도, 면적
+2. **감정가격**: 감정평가액, 평당 가격
+3. **건물 현황**: 구조, 층수, 준공년도, 상태
+4. **입지 분석**: 교통, 주변환경, 장단점
+5. **특이사항**: 주의해야 할 점
+6. **투자 포인트**: 3줄 요약
+
+## 규칙
+- 한국어로 작성
+- 마크다운 형식 사용
+- 1500자 이내로 간결하게
+- 확실하지 않은 정보는 "확인 필요"로 표시
+
+---
+감정평가서 내용:
+"""
+
+
+def summarize_appraisal_pdf(pdf_text: str, provider: str = "gemini") -> str:
+    """
+    감정평가서 PDF 텍스트를 AI로 요약
+
+    Args:
+        pdf_text: PDF에서 추출한 텍스트
+        provider: AI 제공자 (gemini, claude)
+
+    Returns:
+        요약된 마크다운 텍스트
+    """
+    if not pdf_text or len(pdf_text.strip()) < 100:
+        return "❌ PDF 텍스트가 충분하지 않습니다."
+
+    # 텍스트 길이 제한 (토큰 절약)
+    max_chars = 15000  # 약 5000 토큰
+    if len(pdf_text) > max_chars:
+        pdf_text = pdf_text[:max_chars] + "\n\n[이하 생략...]"
+
+    prompt = PDF_SUMMARY_PROMPT + pdf_text
+
+    if provider == "gemini" and GEMINI_AVAILABLE:
+        return _summarize_with_gemini(prompt)
+    elif provider == "claude" and ANTHROPIC_API_KEY:
+        return _summarize_with_claude(prompt)
+    else:
+        return "❌ AI 서비스를 사용할 수 없습니다. API 키를 확인해주세요."
+
+
+def _summarize_with_gemini(prompt: str) -> str:
+    """Gemini Flash로 요약"""
+    if not GEMINI_CLIENT:
+        return "[오류] Gemini API 키가 설정되지 않았습니다."
+
+    try:
+        response = GEMINI_CLIENT.models.generate_content(
+            model="gemini-2.0-flash-lite",
+            contents=prompt,
+            config={
+                "max_output_tokens": 1500,
+                "temperature": 0.3,
+            }
+        )
+        return response.text
+    except Exception as e:
+        return f"[오류] Gemini 오류: {e}"
+
+
+def _summarize_with_claude(prompt: str) -> str:
+    """Claude Opus로 요약 (고품질)"""
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-opus-4-20250514",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.content[0].text
+    except Exception as e:
+        return f"❌ Claude 오류: {e}"
+
+
+# ================================
+# 테스트
+# ================================
+if __name__ == "__main__":
+    print("=" * 60)
+    print("Gemini API Test")
+    print("=" * 60)
+
+    if GEMINI_AVAILABLE and GEMINI_CLIENT:
+        print("[OK] Gemini API Connected!")
+
+        # 간단한 테스트
+        try:
+            response = GEMINI_CLIENT.models.generate_content(
+                model="gemini-2.0-flash-lite",
+                contents="Hello! Explain Seoul apartment auction in one sentence in Korean."
+            )
+            print(f"\nResponse: {response.text}")
+        except Exception as e:
+            print(f"[ERROR] Test failed: {e}")
+    else:
+        print("[ERROR] Gemini API key not configured.")
+        print("  Set GEMINI_API_KEY in .env file.")
